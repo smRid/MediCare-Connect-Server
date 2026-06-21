@@ -1,0 +1,23 @@
+{
+  "name": "medicare-connect-server",
+  "version": "1.0.0",
+  "description": "Express API for MediCare Connect.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node --watch index.js",
+    "start": "node index.js",
+    "check": "node --check index.js",
+    "test": "npm run check"
+  },
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^9.6.3",
+    "stripe": "^20.0.0"
+  }
+}
