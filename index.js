@@ -320,6 +320,63 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
+app.post("/api/auth/google", async (req, res) => {
+  try {
+    const { email, name, photo, role = "patient" } = req.body;
+
+    if (!email || !name) {
+      return res.status(400).json({ message: "Google profile is required" });
+    }
+
+    const normalizedEmail = email.toLowerCase();
+    const requestedRole = roles.includes(role) && role !== "admin" ? role : "patient";
+    const user = await User.findOneAndUpdate(
+      { email: normalizedEmail },
+      {
+        $setOnInsert: {
+          email: normalizedEmail,
+          role: requestedRole,
+          provider: "google",
+        },
+        $set: { name, photo },
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true },
+    );
+
+    if (user.status === "suspended") {
+      return res.status(403).json({ message: "Account is suspended" });
+    }
+
+    if (user.role === "doctor") {
+      const existingProfile = await mongoose.connection
+        .collection("doctors")
+        .findOne({ user: user._id });
+
+      if (!existingProfile) {
+        await mongoose.connection.collection("doctors").insertOne({
+          user: user._id,
+          specialization: req.body.specialization || "General Medicine",
+          qualifications: req.body.qualifications || "MBBS",
+          experience: Number(req.body.experience || 0),
+          consultationFee: Number(req.body.consultationFee || 50),
+          hospital: req.body.hospital || "MediCare Partner Hospital",
+          image: photo || "",
+          days: req.body.days || ["Monday"],
+          slots: req.body.slots || ["10:00 AM"],
+          verificationStatus: "pending",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      }
+    }
+
+    res.json({ user: publicUser(user), token: signToken(user) });
+  } catch (error) {
+    console.error("[auth:google]", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
 app.get("/api/auth/me", verifyToken, async (req, res) => {
   res.json(publicUser(req.user));
 });
