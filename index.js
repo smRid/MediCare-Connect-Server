@@ -90,6 +90,102 @@ const Appointment =
   mongoose.models.Appointment ||
   mongoose.model("Appointment", appointmentSchema);
 
+const reviewSchema = new mongoose.Schema(
+  {
+    patient: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+    doctor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Doctor",
+      required: true,
+      index: true,
+    },
+    rating: { type: Number, required: true, min: 1, max: 5 },
+    comment: { type: String, required: true, trim: true },
+  },
+  { timestamps: true },
+);
+
+const paymentSchema = new mongoose.Schema(
+  {
+    appointment: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Appointment",
+      required: true,
+      index: true,
+    },
+    patient: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+    doctor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Doctor",
+      required: true,
+      index: true,
+    },
+    amount: { type: Number, required: true, min: 0 },
+    currency: { type: String, default: "usd" },
+    transactionId: { type: String, required: true, index: true },
+    provider: { type: String, default: "stripe" },
+    status: {
+      type: String,
+      enum: ["pending", "paid", "failed", "refunded"],
+      default: "pending",
+      index: true,
+    },
+    paidAt: Date,
+  },
+  { timestamps: true, strict: false },
+);
+
+const prescriptionSchema = new mongoose.Schema(
+  {
+    appointment: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Appointment",
+      required: true,
+      index: true,
+    },
+    patient: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+    doctor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Doctor",
+      required: true,
+      index: true,
+    },
+    diagnosis: { type: String, required: true, trim: true },
+    medications: [
+      {
+        name: { type: String, required: true, trim: true },
+        dosage: { type: String, required: true, trim: true },
+        duration: { type: String, trim: true },
+        instructions: { type: String, trim: true },
+      },
+    ],
+    notes: { type: String, trim: true },
+  },
+  { timestamps: true },
+);
+
+const Review = mongoose.models.Review || mongoose.model("Review", reviewSchema);
+const Payment =
+  mongoose.models.Payment || mongoose.model("Payment", paymentSchema);
+const Prescription =
+  mongoose.models.Prescription ||
+  mongoose.model("Prescription", prescriptionSchema);
+
 app.get("/", (_req, res) => {
   res.send("MediCare Connect API is healthy");
 });
