@@ -611,6 +611,121 @@ app.patch(
   },
 );
 
+const appointmentStatuses = [
+  "requested",
+  "accepted",
+  "rejected",
+  "rescheduled",
+  "cancelled",
+  "completed",
+];
+
+const findDoctorProfileForUser = async (userId) =>
+  mongoose.connection.collection("doctors").findOne({ user: userId });
+
+app.get("/api/appointments", verifyToken, async (req, res) => {
+  try {
+    const query = {};
+
+    if (req.user.role === "patient") {
+      query.patient = req.user._id;
+    }
+
+    if (req.user.role === "doctor") {
+      const doctor = await findDoctorProfileForUser(req.user._id);
+      query.doctor = doctor?._id || new mongoose.Types.ObjectId();
+    }
+
+    if (req.query.status) query.status = req.query.status;
+
+    const appointments = await Appointment.find(query)
+      .populate("patient", "name email photo phone gender")
+      .sort({ date: 1, time: 1 });
+
+    res.json(appointments);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.post("/api/appointments", verifyToken, verifyRole("patient"), async (req, res) => {
+  try {
+    const doctorId = toObjectId(req.body.doctor || req.body.doctorId);
+    if (!doctorId) return res.status(400).json({ message: "Invalid doctor id" });
+
+    const doctor = await mongoose.connection.collection("doctors").findOne({
+      _id: doctorId,
+      verificationStatus: "verified",
+    });
+
+    if (!doctor) return res.status(404).json({ message: "Doctor not available" });
+    if (!req.body.date || !req.body.time) {
+      return res.status(400).json({ message: "Date and time are required" });
+    }
+
+    const appointment = await Appointment.create({
+      patient: req.user._id,
+      doctor: doctor._id,
+      date: req.body.date,
+      time: req.body.time,
+      symptoms: req.body.symptoms,
+      status: "requested",
+      paymentStatus: "unpaid",
+      amount: doctor.consultationFee || 0,
+    });
+
+    res.status(201).json(appointment);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.patch("/api/appointments/:id", verifyToken, async (req, res) => {
+  try {
+    const appointment = await Appointment.findById(req.params.id);
+    if (!appointment) return res.status(404).json({ message: "Appointment not found" });
+
+    const isPatient = appointment.patient.toString() === req.user._id.toString();
+    let isDoctor = false;
+
+    if (req.user.role === "doctor") {
+      const doctor = await findDoctorProfileForUser(req.user._id);
+      isDoctor = doctor?._id?.toString() === appointment.doctor.toString();
+    }
+
+    if (req.user.role !== "admin" && !isPatient && !isDoctor) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    if (req.user.role === "patient") {
+      if (!isPatient) return res.status(403).json({ message: "Forbidden" });
+
+      const updates = pick(req.body, ["date", "time", "symptoms"]);
+      if (req.body.status === "cancelled") {
+        updates.status = "cancelled";
+      } else if (updates.date || updates.time) {
+        updates.status = "rescheduled";
+      }
+
+      Object.assign(appointment, updates);
+    }
+
+    if (req.user.role === "doctor" || req.user.role === "admin") {
+      if (req.user.role === "doctor" && !isDoctor) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      if (req.body.status && appointmentStatuses.includes(req.body.status)) {
+        appointment.status = req.body.status;
+      }
+    }
+
+    await appointment.save();
+    res.json(appointment);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
 const connectDB = async () => {
   const mongoUri = process.env.MONGO_DB_URI;
   if (!mongoUri) throw new Error("Missing environment variable: MONGO_DB_URI");
