@@ -45,6 +45,51 @@ const userSchema = new mongoose.Schema(
 
 const User = mongoose.models.User || mongoose.model("User", userSchema);
 
+const appointmentSchema = new mongoose.Schema(
+  {
+    patient: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+    doctor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Doctor",
+      required: true,
+      index: true,
+    },
+    date: { type: Date, required: true, index: true },
+    time: { type: String, required: true, trim: true },
+    symptoms: { type: String, trim: true },
+    status: {
+      type: String,
+      enum: [
+        "requested",
+        "accepted",
+        "rejected",
+        "rescheduled",
+        "cancelled",
+        "completed",
+      ],
+      default: "requested",
+      index: true,
+    },
+    paymentStatus: {
+      type: String,
+      enum: ["unpaid", "pending", "paid", "refunded", "failed"],
+      default: "unpaid",
+      index: true,
+    },
+    amount: { type: Number, required: true, min: 0 },
+  },
+  { timestamps: true },
+);
+
+const Appointment =
+  mongoose.models.Appointment ||
+  mongoose.model("Appointment", appointmentSchema);
+
 app.get("/", (_req, res) => {
   res.send("MediCare Connect API is healthy");
 });
