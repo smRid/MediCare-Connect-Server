@@ -1,6 +1,7 @@
 const express = require("express");
 require("dotenv").config();
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 
 const app = express();
@@ -185,6 +186,51 @@ const Payment =
 const Prescription =
   mongoose.models.Prescription ||
   mongoose.model("Prescription", prescriptionSchema);
+
+const signToken = (user) =>
+  jwt.sign(
+    { sub: user._id.toString(), role: user.role, email: user.email },
+    process.env.JWT_SECRET || "dev-only-secret-change-me",
+    { expiresIn: process.env.JWT_EXPIRES_IN || "7d" },
+  );
+
+const publicUser = (user) => {
+  const plain = typeof user.toObject === "function" ? user.toObject() : { ...user };
+  delete plain.passwordHash;
+  return { ...plain, id: plain._id?.toString() };
+};
+
+const verifyToken = async (req, res, next) => {
+  try {
+    const header = req.headers.authorization;
+    const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
+
+    if (!token) return res.status(401).json({ message: "Unauthorized" });
+
+    const payload = jwt.verify(
+      token,
+      process.env.JWT_SECRET || "dev-only-secret-change-me",
+    );
+    const user = await User.findById(payload.sub);
+
+    if (!user || user.status === "suspended") {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    req.user = user;
+    next();
+  } catch (error) {
+    return res.status(401).json({ message: "Unauthorized", error: error.message });
+  }
+};
+
+const verifyRole = (...allowedRoles) => (req, res, next) => {
+  if (!allowedRoles.includes(req.user?.role)) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  next();
+};
 
 app.get("/", (_req, res) => {
   res.send("MediCare Connect API is healthy");
