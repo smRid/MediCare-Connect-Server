@@ -726,6 +726,114 @@ app.patch("/api/appointments/:id", verifyToken, async (req, res) => {
   }
 });
 
+const recalculateDoctorRating = async (doctorId) => {
+  const result = await Review.aggregate([
+    { $match: { doctor: doctorId } },
+    {
+      $group: {
+        _id: "$doctor",
+        average: { $avg: "$rating" },
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+  const stats = result[0] || { average: 0, count: 0 };
+
+  await mongoose.connection.collection("doctors").updateOne(
+    { _id: doctorId },
+    {
+      $set: {
+        ratingAverage: Number((stats.average || 0).toFixed(1)),
+        reviewCount: stats.count,
+        updatedAt: new Date(),
+      },
+    },
+  );
+};
+
+app.get("/api/reviews", async (req, res) => {
+  try {
+    const query = {};
+
+    if (req.query.doctor || req.query.doctorId) {
+      const doctorId = toObjectId(req.query.doctor || req.query.doctorId);
+      if (!doctorId) return res.status(400).json({ message: "Invalid doctor id" });
+      query.doctor = doctorId;
+    }
+
+    const reviews = await Review.find(query)
+      .populate("patient", "name photo")
+      .sort({ createdAt: -1 })
+      .limit(50);
+
+    res.json(reviews);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.post("/api/reviews", verifyToken, verifyRole("patient"), async (req, res) => {
+  try {
+    const doctorId = toObjectId(req.body.doctor || req.body.doctorId);
+    if (!doctorId) return res.status(400).json({ message: "Invalid doctor id" });
+
+    const doctor = await mongoose.connection.collection("doctors").findOne({ _id: doctorId });
+    if (!doctor) return res.status(404).json({ message: "Doctor not found" });
+
+    const review = await Review.create({
+      patient: req.user._id,
+      doctor: doctor._id,
+      rating: Number(req.body.rating),
+      comment: req.body.comment,
+    });
+
+    await recalculateDoctorRating(doctor._id);
+    res.status(201).json(review);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.patch("/api/reviews/:id", verifyToken, async (req, res) => {
+  try {
+    const review = await Review.findById(req.params.id);
+    if (!review) return res.status(404).json({ message: "Review not found" });
+
+    const isOwner = review.patient.toString() === req.user._id.toString();
+    if (req.user.role !== "admin" && !isOwner) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    Object.assign(review, pick(req.body, ["rating", "comment"]));
+    await review.save();
+    await recalculateDoctorRating(review.doctor);
+
+    res.json(review);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.delete("/api/reviews/:id", verifyToken, async (req, res) => {
+  try {
+    const review = await Review.findById(req.params.id);
+    if (!review) return res.status(404).json({ message: "Review not found" });
+
+    const isOwner = review.patient.toString() === req.user._id.toString();
+    if (req.user.role !== "admin" && !isOwner) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const doctorId = review.doctor;
+    await review.deleteOne();
+    await recalculateDoctorRating(doctorId);
+
+    res.json({ message: "Review deleted" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
 const connectDB = async () => {
   const mongoUri = process.env.MONGO_DB_URI;
   if (!mongoUri) throw new Error("Missing environment variable: MONGO_DB_URI");
