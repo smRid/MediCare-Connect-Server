@@ -298,6 +298,42 @@ app.post("/api/auth/register", async (req, res) => {
   }
 });
 
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email: String(email).toLowerCase() });
+
+    if (!user || !user.passwordHash) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+    if (user.status === "suspended") {
+      return res.status(403).json({ message: "Account is suspended" });
+    }
+
+    const valid = await bcrypt.compare(password || "", user.passwordHash);
+    if (!valid) return res.status(401).json({ message: "Invalid email or password" });
+
+    res.json({ user: publicUser(user), token: signToken(user) });
+  } catch (error) {
+    console.error("[auth:login]", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.get("/api/auth/me", verifyToken, async (req, res) => {
+  res.json(publicUser(req.user));
+});
+
+app.patch("/api/users/me", verifyToken, async (req, res) => {
+  try {
+    const updates = pick(req.body, ["name", "photo", "phone", "gender"]);
+    const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true });
+    res.json(publicUser(user));
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
 const connectDB = async () => {
   const mongoUri = process.env.MONGO_DB_URI;
   if (!mongoUri) throw new Error("Missing environment variable: MONGO_DB_URI");
