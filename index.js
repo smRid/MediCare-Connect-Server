@@ -391,6 +391,51 @@ app.patch("/api/users/me", verifyToken, async (req, res) => {
   }
 });
 
+app.get("/api/users", verifyToken, verifyRole("admin"), async (_req, res) => {
+  try {
+    const users = await User.find({}).sort({ createdAt: -1 });
+    res.json(users.map(publicUser));
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.patch(
+  "/api/users/:id/status",
+  verifyToken,
+  verifyRole("admin"),
+  async (req, res) => {
+    try {
+      if (!["active", "suspended"].includes(req.body.status)) {
+        return res.status(400).json({ message: "Invalid status" });
+      }
+
+      const user = await User.findByIdAndUpdate(
+        req.params.id,
+        { status: req.body.status },
+        { new: true },
+      );
+
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      res.json(publicUser(user));
+    } catch (error) {
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+);
+
+app.delete("/api/users/:id", verifyToken, verifyRole("admin"), async (req, res) => {
+  try {
+    const user = await User.findByIdAndDelete(req.params.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    res.json({ message: "User deleted" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
 const connectDB = async () => {
   const mongoUri = process.env.MONGO_DB_URI;
   if (!mongoUri) throw new Error("Missing environment variable: MONGO_DB_URI");
