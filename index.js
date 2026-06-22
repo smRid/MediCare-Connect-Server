@@ -933,6 +933,106 @@ app.post("/api/payments", verifyToken, verifyRole("patient", "admin"), async (re
   }
 });
 
+app.get("/api/prescriptions", verifyToken, async (req, res) => {
+  try {
+    const query = {};
+
+    if (req.user.role === "patient") {
+      query.patient = req.user._id;
+    }
+
+    if (req.user.role === "doctor") {
+      const doctor = await findDoctorProfileForUser(req.user._id);
+      query.doctor = doctor?._id || new mongoose.Types.ObjectId();
+    }
+
+    if (req.query.appointment || req.query.appointmentId) {
+      const appointmentId = toObjectId(req.query.appointment || req.query.appointmentId);
+      if (!appointmentId) return res.status(400).json({ message: "Invalid appointment id" });
+      query.appointment = appointmentId;
+    }
+
+    const prescriptions = await Prescription.find(query)
+      .populate("patient", "name email photo phone gender")
+      .populate("appointment")
+      .sort({ createdAt: -1 });
+
+    res.json(prescriptions);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.post(
+  "/api/prescriptions",
+  verifyToken,
+  verifyRole("doctor", "admin"),
+  async (req, res) => {
+    try {
+      const appointment = await Appointment.findById(req.body.appointment || req.body.appointmentId);
+
+      if (!appointment) {
+        return res.status(404).json({ message: "Appointment not found" });
+      }
+
+      if (req.user.role === "doctor") {
+        const doctor = await findDoctorProfileForUser(req.user._id);
+        if (doctor?._id?.toString() !== appointment.doctor.toString()) {
+          return res.status(403).json({ message: "Forbidden" });
+        }
+      }
+
+      const prescription = await Prescription.create({
+        appointment: appointment._id,
+        patient: appointment.patient,
+        doctor: appointment.doctor,
+        diagnosis: req.body.diagnosis,
+        medications: req.body.medications || [],
+        notes: req.body.notes,
+      });
+
+      appointment.status = "completed";
+      await appointment.save();
+
+      res.status(201).json(prescription);
+    } catch (error) {
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+);
+
+app.patch(
+  "/api/prescriptions/:id",
+  verifyToken,
+  verifyRole("doctor", "admin"),
+  async (req, res) => {
+    try {
+      const prescription = await Prescription.findById(req.params.id);
+
+      if (!prescription) {
+        return res.status(404).json({ message: "Prescription not found" });
+      }
+
+      if (req.user.role === "doctor") {
+        const doctor = await findDoctorProfileForUser(req.user._id);
+        if (doctor?._id?.toString() !== prescription.doctor.toString()) {
+          return res.status(403).json({ message: "Forbidden" });
+        }
+      }
+
+      Object.assign(
+        prescription,
+        pick(req.body, ["diagnosis", "medications", "notes"]),
+      );
+      await prescription.save();
+
+      res.json(prescription);
+    } catch (error) {
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+);
+
 const connectDB = async () => {
   const mongoUri = process.env.MONGO_DB_URI;
   if (!mongoUri) throw new Error("Missing environment variable: MONGO_DB_URI");
