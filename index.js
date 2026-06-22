@@ -436,6 +436,181 @@ app.delete("/api/users/:id", verifyToken, verifyRole("admin"), async (req, res) 
   }
 });
 
+const toObjectId = (id) => {
+  if (!mongoose.Types.ObjectId.isValid(id)) return null;
+  return new mongoose.Types.ObjectId(id);
+};
+
+const serializeDoctor = (doctor) => {
+  if (!doctor) return null;
+  const safeDoctor = { ...doctor };
+
+  if (safeDoctor.userProfile) {
+    delete safeDoctor.userProfile.passwordHash;
+  }
+
+  return {
+    ...safeDoctor,
+    id: doctor._id?.toString(),
+    _id: doctor._id?.toString(),
+    user: doctor.user?.toString?.() || doctor.user,
+  };
+};
+
+const doctorSort = (value) => {
+  if (value === "fee_asc") return { consultationFee: 1 };
+  if (value === "fee_desc") return { consultationFee: -1 };
+  if (value === "experience") return { experience: -1 };
+  if (value === "rating") return { ratingAverage: -1, rating: -1 };
+  return { createdAt: -1 };
+};
+
+const buildDoctorSearchMatch = (query) => {
+  const match = {};
+
+  if (query.status) match.verificationStatus = query.status;
+  if (query.specialization) {
+    match.specialization = { $regex: query.specialization, $options: "i" };
+  }
+  if (query.search) {
+    match.$or = [
+      { doctorName: { $regex: query.search, $options: "i" } },
+      { specialization: { $regex: query.search, $options: "i" } },
+    ];
+  }
+
+  return match;
+};
+
+app.get("/api/doctors", async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const perPage = Math.min(Math.max(parseInt(req.query.perPage, 10) || 9, 1), 50);
+    const skip = (page - 1) * perPage;
+    const match = buildDoctorSearchMatch(req.query);
+
+    if (!req.query.includeUnverified) {
+      match.verificationStatus = match.verificationStatus || "verified";
+    }
+
+    const pipeline = [
+      {
+        $lookup: {
+          from: "users",
+          localField: "user",
+          foreignField: "_id",
+          as: "userProfile",
+        },
+      },
+      { $unwind: { path: "$userProfile", preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          doctorName: { $ifNull: ["$doctorName", "$userProfile.name"] },
+          profileImage: { $ifNull: ["$image", "$userProfile.photo"] },
+        },
+      },
+      { $match: match },
+      {
+        $facet: {
+          doctors: [{ $sort: doctorSort(req.query.sort) }, { $skip: skip }, { $limit: perPage }],
+          total: [{ $count: "count" }],
+        },
+      },
+    ];
+
+    const [result] = await mongoose.connection.collection("doctors").aggregate(pipeline).toArray();
+    const doctors = result.doctors.map(serializeDoctor);
+    const total = result.total[0]?.count || 0;
+
+    res.json({ total, page, perPage, doctors });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.get("/api/doctors/me", verifyToken, verifyRole("doctor"), async (req, res) => {
+  try {
+    const doctor = await mongoose.connection
+      .collection("doctors")
+      .findOne({ user: req.user._id });
+
+    if (!doctor) return res.status(404).json({ message: "Doctor profile not found" });
+
+    res.json(serializeDoctor(doctor));
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.get("/api/doctors/:id", async (req, res) => {
+  try {
+    const doctorId = toObjectId(req.params.id);
+    if (!doctorId) return res.status(400).json({ message: "Invalid doctor id" });
+
+    const [doctor] = await mongoose.connection
+      .collection("doctors")
+      .aggregate([
+        { $match: { _id: doctorId } },
+        {
+          $lookup: {
+            from: "users",
+            localField: "user",
+            foreignField: "_id",
+            as: "userProfile",
+          },
+        },
+        { $unwind: { path: "$userProfile", preserveNullAndEmptyArrays: true } },
+        {
+          $addFields: {
+            doctorName: { $ifNull: ["$doctorName", "$userProfile.name"] },
+            profileImage: { $ifNull: ["$image", "$userProfile.photo"] },
+          },
+        },
+      ])
+      .toArray();
+
+    if (!doctor) return res.status(404).json({ message: "Doctor not found" });
+
+    res.json(serializeDoctor(doctor));
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.patch(
+  "/api/doctors/:id/verification",
+  verifyToken,
+  verifyRole("admin"),
+  async (req, res) => {
+    try {
+      if (!["pending", "verified", "rejected"].includes(req.body.verificationStatus)) {
+        return res.status(400).json({ message: "Invalid verification status" });
+      }
+
+      const doctorId = toObjectId(req.params.id);
+      if (!doctorId) return res.status(400).json({ message: "Invalid doctor id" });
+
+      const result = await mongoose.connection.collection("doctors").findOneAndUpdate(
+        { _id: doctorId },
+        {
+          $set: {
+            verificationStatus: req.body.verificationStatus,
+            updatedAt: new Date(),
+          },
+        },
+        { returnDocument: "after" },
+      );
+
+      const doctor = result.value || result;
+      if (!doctor) return res.status(404).json({ message: "Doctor not found" });
+
+      res.json(serializeDoctor(doctor));
+    } catch (error) {
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+);
+
 const connectDB = async () => {
   const mongoUri = process.env.MONGO_DB_URI;
   if (!mongoUri) throw new Error("Missing environment variable: MONGO_DB_URI");
