@@ -1098,11 +1098,190 @@ app.get("/api/analytics", verifyToken, verifyRole("admin"), async (_req, res) =>
   }
 });
 
+const seedDemoData = async () => {
+  if (process.env.SEED_DEMO_DATA === "false") return;
+
+  const existingUsers = await User.estimatedDocumentCount();
+  if (existingUsers > 0) return;
+
+  const [adminPassword, patientPassword, doctorPassword] = await Promise.all([
+    bcrypt.hash(process.env.ADMIN_PASSWORD || "Admin#12345", 10),
+    bcrypt.hash("Patient#123", 10),
+    bcrypt.hash("Doctor#123", 10),
+  ]);
+
+  const [admin, patient, doctorUser] = await User.create([
+    {
+      name: "MediCare Admin",
+      email: process.env.ADMIN_EMAIL || "admin@medicare.test",
+      passwordHash: adminPassword,
+      role: "admin",
+      photo:
+        "https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=300&q=80",
+    },
+    {
+      name: "Ariana Rahman",
+      email: "patient@medicare.test",
+      passwordHash: patientPassword,
+      role: "patient",
+      phone: "+1 555 0142",
+      gender: "female",
+      photo:
+        "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=300&q=80",
+    },
+    {
+      name: "Dr. Mason Lee",
+      email: "doctor@medicare.test",
+      passwordHash: doctorPassword,
+      role: "doctor",
+      phone: "+1 555 0198",
+      photo:
+        "https://images.unsplash.com/photo-1537368910025-700350fe46c7?auto=format&fit=crop&w=300&q=80",
+    },
+  ]);
+
+  const now = new Date();
+  const doctorsResult = await mongoose.connection.collection("doctors").insertMany([
+    {
+      user: doctorUser._id,
+      doctorName: "Dr. Mason Lee",
+      specialization: "Cardiology",
+      qualifications: "MBBS, MD Cardiology",
+      experience: 13,
+      consultationFee: 120,
+      hospital: "Northline Heart Institute",
+      image:
+        "https://images.unsplash.com/photo-1537368910025-700350fe46c7?auto=format&fit=crop&w=600&q=80",
+      days: ["Monday", "Wednesday", "Friday"],
+      slots: ["09:00 AM", "11:30 AM", "03:00 PM"],
+      verificationStatus: "verified",
+      bio: "Focused on preventive heart care and rapid post-procedure recovery.",
+      location: "New York, NY",
+      ratingAverage: 0,
+      reviewCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      doctorName: "Dr. Selina Ahmed",
+      specialization: "Neurology",
+      qualifications: "MBBS, FCPS Neurology",
+      experience: 9,
+      consultationFee: 95,
+      hospital: "Cedar Neuro Center",
+      image:
+        "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=600&q=80",
+      days: ["Sunday", "Tuesday", "Thursday"],
+      slots: ["10:00 AM", "01:00 PM", "05:00 PM"],
+      verificationStatus: "verified",
+      bio: "Specializes in migraine care, memory clinics, and neuro-rehab planning.",
+      location: "Austin, TX",
+      ratingAverage: 0,
+      reviewCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      doctorName: "Dr. Noor Patel",
+      specialization: "Pediatrics",
+      qualifications: "MBBS, DCH",
+      experience: 7,
+      consultationFee: 70,
+      hospital: "Little Oaks Children's Hospital",
+      image:
+        "https://images.unsplash.com/photo-1594824476967-48c8b964273f?auto=format&fit=crop&w=600&q=80",
+      days: ["Monday", "Tuesday", "Saturday"],
+      slots: ["09:30 AM", "12:00 PM", "04:30 PM"],
+      verificationStatus: "verified",
+      bio: "Gentle pediatric care with a practical approach for busy families.",
+      location: "Seattle, WA",
+      ratingAverage: 0,
+      reviewCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ]);
+
+  const doctorIds = Object.values(doctorsResult.insertedIds);
+  const primaryDoctorId = doctorIds[0];
+
+  const appointment = await Appointment.create({
+    patient: patient._id,
+    doctor: primaryDoctorId,
+    date: new Date(Date.now() + 86400000),
+    time: "11:30 AM",
+    symptoms: "Chest tightness during morning runs",
+    status: "accepted",
+    paymentStatus: "paid",
+    amount: 120,
+  });
+
+  await Review.create([
+    {
+      patient: patient._id,
+      doctor: primaryDoctorId,
+      rating: 5,
+      comment:
+        "The booking was fast, the doctor had my notes ready, and the follow-up plan was clear.",
+    },
+    {
+      patient: patient._id,
+      doctor: doctorIds[1],
+      rating: 5,
+      comment:
+        "MediCare Connect made it easy to compare specialists and avoid waiting-room delays.",
+    },
+    {
+      patient: patient._id,
+      doctor: doctorIds[2],
+      rating: 4,
+      comment: "The pediatric appointment reminders helped our family stay on schedule.",
+    },
+  ]);
+
+  await Promise.all(doctorIds.map(recalculateDoctorRating));
+
+  await Payment.create({
+    appointment: appointment._id,
+    patient: patient._id,
+    doctor: primaryDoctorId,
+    amount: appointment.amount,
+    currency: "usd",
+    transactionId: "demo_txn_heart_001",
+    provider: "demo",
+    status: "paid",
+    paidAt: new Date(),
+  });
+
+  await Prescription.create({
+    appointment: appointment._id,
+    patient: patient._id,
+    doctor: primaryDoctorId,
+    diagnosis: "Exercise-induced angina observation",
+    medications: [
+      {
+        name: "Aspirin",
+        dosage: "75mg",
+        duration: "14 days",
+        instructions: "Take once daily after food.",
+      },
+    ],
+    notes: "Schedule ECG and avoid high-intensity exercise until follow-up.",
+  });
+
+  console.log(
+    `Seeded demo data. Admin: ${admin.email} / ${
+      process.env.ADMIN_PASSWORD || "Admin#12345"
+    }`,
+  );
+};
+
 const connectDB = async () => {
   const mongoUri = process.env.MONGO_DB_URI;
   if (!mongoUri) throw new Error("Missing environment variable: MONGO_DB_URI");
 
   await mongoose.connect(mongoUri, { dbName: "medicare_connect" });
+  await seedDemoData();
   console.log("MongoDB connected");
 };
 
