@@ -1,5 +1,6 @@
 const express = require("express");
 require("dotenv").config();
+const bcrypt = require("bcryptjs");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
@@ -232,8 +233,69 @@ const verifyRole = (...allowedRoles) => (req, res, next) => {
   next();
 };
 
+const strongPassword = /^(?=.*\d)(?=.*[!@#$%^&*()_\-+=[\]{};':"\\|,.<>/?]).{6,}$/;
+
+const pick = (source, fields) =>
+  fields.reduce((result, field) => {
+    if (source[field] !== undefined) result[field] = source[field];
+    return result;
+  }, {});
+
 app.get("/", (_req, res) => {
   res.send("MediCare Connect API is healthy");
+});
+
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    const { name, email, password, role = "patient" } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "Name, email, and password are required" });
+    }
+    if (!roles.includes(role) || role === "admin") {
+      return res.status(400).json({ message: "Invalid registration role" });
+    }
+    if (!strongPassword.test(password)) {
+      return res.status(400).json({
+        message:
+          "Password must be at least 6 characters and include a number and special character",
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase();
+    const existing = await User.findOne({ email: normalizedEmail });
+    if (existing) return res.status(409).json({ message: "Email already exists" });
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await User.create({
+      ...pick(req.body, ["name", "photo", "phone", "gender"]),
+      email: normalizedEmail,
+      passwordHash,
+      role,
+    });
+
+    if (role === "doctor") {
+      await mongoose.connection.collection("doctors").insertOne({
+        user: user._id,
+        specialization: req.body.specialization || "General Medicine",
+        qualifications: req.body.qualifications || "MBBS",
+        experience: Number(req.body.experience || 0),
+        consultationFee: Number(req.body.consultationFee || 50),
+        hospital: req.body.hospital || "MediCare Partner Hospital",
+        image: req.body.photo || "",
+        days: req.body.days || ["Monday", "Wednesday"],
+        slots: req.body.slots || ["10:00 AM", "02:00 PM"],
+        verificationStatus: "pending",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+
+    res.status(201).json({ user: publicUser(user), token: signToken(user) });
+  } catch (error) {
+    console.error("[auth:register]", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
 });
 
 const connectDB = async () => {
