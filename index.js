@@ -1033,6 +1033,71 @@ app.patch(
   },
 );
 
+app.get("/api/stats", async (_req, res) => {
+  try {
+    const [doctors, patients, appointments, reviews, slotStats] = await Promise.all([
+      mongoose.connection
+        .collection("doctors")
+        .countDocuments({ verificationStatus: "verified" }),
+      User.countDocuments({ role: "patient" }),
+      Appointment.countDocuments(),
+      Review.countDocuments(),
+      mongoose.connection
+        .collection("doctors")
+        .aggregate([
+          { $match: { verificationStatus: "verified" } },
+          { $project: { slotCount: { $size: { $ifNull: ["$slots", []] } } } },
+          { $group: { _id: null, total: { $sum: "$slotCount" } } },
+        ])
+        .toArray(),
+    ]);
+
+    res.json({
+      doctors,
+      patients,
+      appointments,
+      reviews,
+      openSlots: slotStats[0]?.total || 0,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.get("/api/analytics", verifyToken, verifyRole("admin"), async (_req, res) => {
+  try {
+    const [topDoctors, usersByRole, appointmentsByStatus, paymentsByStatus] =
+      await Promise.all([
+        mongoose.connection
+          .collection("doctors")
+          .find({})
+          .sort({ ratingAverage: -1, reviewCount: -1 })
+          .limit(10)
+          .toArray(),
+        User.aggregate([{ $group: { _id: "$role", count: { $sum: 1 } } }]),
+        Appointment.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
+        Payment.aggregate([
+          {
+            $group: {
+              _id: "$status",
+              count: { $sum: 1 },
+              total: { $sum: "$amount" },
+            },
+          },
+        ]),
+      ]);
+
+    res.json({
+      topDoctors: topDoctors.map(serializeDoctor),
+      usersByRole,
+      appointmentsByStatus,
+      paymentsByStatus,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
 const connectDB = async () => {
   const mongoUri = process.env.MONGO_DB_URI;
   if (!mongoUri) throw new Error("Missing environment variable: MONGO_DB_URI");
