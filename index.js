@@ -4,9 +4,13 @@ const bcrypt = require("bcryptjs");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
+const Stripe = require("stripe");
 
 const app = express();
 const port = process.env.PORT || 5000;
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? new Stripe(process.env.STRIPE_SECRET_KEY)
+  : null;
 
 app.use(
   cors({
@@ -829,6 +833,101 @@ app.delete("/api/reviews/:id", verifyToken, async (req, res) => {
     await recalculateDoctorRating(doctorId);
 
     res.json({ message: "Review deleted" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.get("/api/payments", verifyToken, async (req, res) => {
+  try {
+    const query = {};
+
+    if (req.user.role === "patient") {
+      query.patient = req.user._id;
+    }
+
+    if (req.user.role === "doctor") {
+      const doctor = await findDoctorProfileForUser(req.user._id);
+      query.doctor = doctor?._id || new mongoose.Types.ObjectId();
+    }
+
+    const payments = await Payment.find(query)
+      .populate("patient", "name email")
+      .populate("appointment")
+      .sort({ createdAt: -1 });
+
+    res.json(payments);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.post(
+  "/api/payments/create-intent",
+  verifyToken,
+  verifyRole("patient"),
+  async (req, res) => {
+    try {
+      const appointment = await Appointment.findById(req.body.appointment || req.body.appointmentId);
+
+      if (!appointment) {
+        return res.status(404).json({ message: "Appointment not found" });
+      }
+      if (appointment.patient.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      if (!stripe) {
+        return res.json({
+          clientSecret: "demo_client_secret",
+          transactionId: `demo_${Date.now()}`,
+          demo: true,
+        });
+      }
+
+      const intent = await stripe.paymentIntents.create({
+        amount: Math.round(appointment.amount * 100),
+        currency: "usd",
+        metadata: {
+          appointmentId: appointment._id.toString(),
+          patientId: appointment.patient.toString(),
+          doctorId: appointment.doctor.toString(),
+        },
+      });
+
+      res.json({ clientSecret: intent.client_secret, transactionId: intent.id });
+    } catch (error) {
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+);
+
+app.post("/api/payments", verifyToken, verifyRole("patient", "admin"), async (req, res) => {
+  try {
+    const appointment = await Appointment.findById(req.body.appointment || req.body.appointmentId);
+
+    if (!appointment) return res.status(404).json({ message: "Appointment not found" });
+    if (req.user.role !== "admin" && appointment.patient.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const status = req.body.status || "paid";
+    const payment = await Payment.create({
+      appointment: appointment._id,
+      patient: appointment.patient,
+      doctor: appointment.doctor,
+      amount: appointment.amount,
+      currency: req.body.currency || "usd",
+      transactionId: req.body.transactionId || `manual_${Date.now()}`,
+      provider: req.body.provider || (stripe ? "stripe" : "demo"),
+      status,
+      paidAt: status === "paid" ? new Date() : undefined,
+    });
+
+    appointment.paymentStatus = status === "paid" ? "paid" : "pending";
+    await appointment.save();
+
+    res.status(201).json(payment);
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }
