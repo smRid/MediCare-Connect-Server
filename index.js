@@ -8,13 +8,16 @@ const Stripe = require("stripe");
 
 const app = express();
 const port = process.env.PORT || 5000;
+const clientOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:3000")
+  .split(",")
+  .map((origin) => origin.trim());
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY)
   : null;
 
 app.use(
   cors({
-    origin: process.env.CLIENT_ORIGIN?.split(",") || "*",
+    origin: clientOrigins,
     credentials: true,
   }),
 );
