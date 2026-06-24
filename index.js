@@ -54,6 +54,9 @@ const userSchema = new mongoose.Schema(
 
 const User = mongoose.models.User || mongoose.model("User", userSchema);
 
+const doctorSchema = new mongoose.Schema({}, { strict: false, collection: "doctors" });
+const Doctor = mongoose.models.Doctor || mongoose.model("Doctor", doctorSchema);
+
 const appointmentSchema = new mongoose.Schema(
   {
     patient: {
@@ -461,6 +464,10 @@ const serializeDoctor = (doctor) => {
     id: doctor._id?.toString(),
     _id: doctor._id?.toString(),
     user: doctor.user?.toString?.() || doctor.user,
+    hospitalName: doctor.hospitalName || doctor.hospital,
+    profileImage: doctor.profileImage || doctor.image || doctor.userProfile?.photo,
+    availableDays: doctor.availableDays || doctor.days || [],
+    availableSlots: doctor.availableSlots || doctor.slots || [],
   };
 };
 
@@ -584,6 +591,69 @@ app.get("/api/doctors/:id", async (req, res) => {
   }
 });
 
+app.patch("/api/doctors/:id", verifyToken, async (req, res) => {
+  try {
+    const doctorId = toObjectId(req.params.id);
+    if (!doctorId) return res.status(400).json({ message: "Invalid doctor id" });
+
+    const existingDoctor = await mongoose.connection
+      .collection("doctors")
+      .findOne({ _id: doctorId });
+
+    if (!existingDoctor) return res.status(404).json({ message: "Doctor not found" });
+
+    const isOwner =
+      req.user.role === "doctor" &&
+      existingDoctor.user?.toString?.() === req.user._id.toString();
+
+    if (req.user.role !== "admin" && !isOwner) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const body = req.body;
+    const updates = pick(body, [
+      "doctorName",
+      "specialization",
+      "qualifications",
+      "experience",
+      "consultationFee",
+      "bio",
+    ]);
+
+    if (body.hospitalName !== undefined || body.hospital !== undefined) {
+      updates.hospital = body.hospital ?? body.hospitalName;
+      updates.hospitalName = body.hospitalName ?? body.hospital;
+    }
+    if (body.profileImage !== undefined || body.image !== undefined) {
+      updates.image = body.image ?? body.profileImage;
+      updates.profileImage = body.profileImage ?? body.image;
+    }
+    if (body.availableDays !== undefined || body.days !== undefined) {
+      updates.days = body.days ?? body.availableDays;
+      updates.availableDays = body.availableDays ?? body.days;
+    }
+    if (body.availableSlots !== undefined || body.slots !== undefined) {
+      updates.slots = body.slots ?? body.availableSlots;
+      updates.availableSlots = body.availableSlots ?? body.slots;
+    }
+    if (updates.experience !== undefined) updates.experience = Number(updates.experience);
+    if (updates.consultationFee !== undefined) {
+      updates.consultationFee = Number(updates.consultationFee);
+    }
+    updates.updatedAt = new Date();
+
+    const result = await mongoose.connection.collection("doctors").findOneAndUpdate(
+      { _id: doctorId },
+      { $set: updates },
+      { returnDocument: "after" },
+    );
+
+    res.json(serializeDoctor(result.value || result));
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
 app.patch(
   "/api/doctors/:id/verification",
   verifyToken,
@@ -647,6 +717,7 @@ app.get("/api/appointments", verifyToken, async (req, res) => {
 
     const appointments = await Appointment.find(query)
       .populate("patient", "name email photo phone gender")
+      .populate("doctor")
       .sort({ date: 1, time: 1 });
 
     res.json(appointments);
@@ -666,15 +737,17 @@ app.post("/api/appointments", verifyToken, verifyRole("patient"), async (req, re
     });
 
     if (!doctor) return res.status(404).json({ message: "Doctor not available" });
-    if (!req.body.date || !req.body.time) {
+    const date = req.body.date || req.body.appointmentDate;
+    const time = req.body.time || req.body.appointmentTime;
+    if (!date || !time) {
       return res.status(400).json({ message: "Date and time are required" });
     }
 
     const appointment = await Appointment.create({
       patient: req.user._id,
       doctor: doctor._id,
-      date: req.body.date,
-      time: req.body.time,
+      date,
+      time,
       symptoms: req.body.symptoms,
       status: "requested",
       paymentStatus: "unpaid",
@@ -708,7 +781,10 @@ app.patch("/api/appointments/:id", verifyToken, async (req, res) => {
       if (!isPatient) return res.status(403).json({ message: "Forbidden" });
 
       const updates = pick(req.body, ["date", "time", "symptoms"]);
-      if (req.body.status === "cancelled") {
+      if (req.body.appointmentDate !== undefined) updates.date = req.body.appointmentDate;
+      if (req.body.appointmentTime !== undefined) updates.time = req.body.appointmentTime;
+      const requestedStatus = req.body.status || req.body.appointmentStatus;
+      if (requestedStatus === "cancelled") {
         updates.status = "cancelled";
       } else if (updates.date || updates.time) {
         updates.status = "rescheduled";
@@ -721,8 +797,9 @@ app.patch("/api/appointments/:id", verifyToken, async (req, res) => {
       if (req.user.role === "doctor" && !isDoctor) {
         return res.status(403).json({ message: "Forbidden" });
       }
-      if (req.body.status && appointmentStatuses.includes(req.body.status)) {
-        appointment.status = req.body.status;
+      const requestedStatus = req.body.status || req.body.appointmentStatus;
+      if (requestedStatus && appointmentStatuses.includes(requestedStatus)) {
+        appointment.status = requestedStatus;
       }
     }
 
@@ -791,7 +868,7 @@ app.post("/api/reviews", verifyToken, verifyRole("patient"), async (req, res) =>
       patient: req.user._id,
       doctor: doctor._id,
       rating: Number(req.body.rating),
-      comment: req.body.comment,
+      comment: req.body.comment || req.body.reviewText,
     });
 
     await recalculateDoctorRating(doctor._id);
@@ -811,7 +888,9 @@ app.patch("/api/reviews/:id", verifyToken, async (req, res) => {
       return res.status(403).json({ message: "Forbidden" });
     }
 
-    Object.assign(review, pick(req.body, ["rating", "comment"]));
+    const updates = pick(req.body, ["rating", "comment"]);
+    if (req.body.reviewText !== undefined) updates.comment = req.body.reviewText;
+    Object.assign(review, updates);
     await review.save();
     await recalculateDoctorRating(review.doctor);
 
@@ -856,6 +935,7 @@ app.get("/api/payments", verifyToken, async (req, res) => {
 
     const payments = await Payment.find(query)
       .populate("patient", "name email")
+      .populate("doctor")
       .populate("appointment")
       .sort({ createdAt: -1 });
 
@@ -957,6 +1037,7 @@ app.get("/api/prescriptions", verifyToken, async (req, res) => {
 
     const prescriptions = await Prescription.find(query)
       .populate("patient", "name email photo phone gender")
+      .populate("doctor")
       .populate("appointment")
       .sort({ createdAt: -1 });
 
