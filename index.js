@@ -8,7 +8,7 @@ const Stripe = require("stripe");
 
 const app = express();
 const port = process.env.PORT || 5000;
-const clientOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:3000")
+const clientOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:3000,https://medicareconnectweb.vercel.app")
   .split(",")
   .map((origin) => origin.trim());
 const stripe = process.env.STRIPE_SECRET_KEY
