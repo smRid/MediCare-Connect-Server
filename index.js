@@ -1185,24 +1185,33 @@ app.get("/api/analytics", verifyToken, verifyRole("admin"), async (_req, res) =>
 const seedDemoData = async () => {
   if (process.env.SEED_DEMO_DATA === "false") return;
 
-  const existingUsers = await User.estimatedDocumentCount();
-  if (existingUsers > 0) return;
+  const adminEmail = process.env.ADMIN_EMAIL || "admin@medicare.test";
+  let admin = await User.findOne({ email: adminEmail });
+  
+  if (!admin) {
+    const adminPassword = await bcrypt.hash(process.env.ADMIN_PASSWORD || "Admin#12345", 10);
+    admin = await User.create({
+      name: "MediCare Admin",
+      email: adminEmail,
+      passwordHash: adminPassword,
+      role: "admin",
+      photo: "https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=300&q=80",
+    });
+    console.log(`Seeded admin user: ${adminEmail}`);
+  }
 
-  const [adminPassword, patientPassword, doctorPassword] = await Promise.all([
-    bcrypt.hash(process.env.ADMIN_PASSWORD || "Admin#12345", 10),
+  const existingUsers = await User.estimatedDocumentCount();
+  if (existingUsers > 1) return;
+
+  const patientExists = await User.findOne({ email: "patient@medicare.test" });
+  if (patientExists) return;
+
+  const [patientPassword, doctorPassword] = await Promise.all([
     bcrypt.hash("Patient#123", 10),
     bcrypt.hash("Doctor#123", 10),
   ]);
 
-  const [admin, patient, doctorUser] = await User.create([
-    {
-      name: "MediCare Admin",
-      email: process.env.ADMIN_EMAIL || "admin@medicare.test",
-      passwordHash: adminPassword,
-      role: "admin",
-      photo:
-        "https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=300&q=80",
-    },
+  const [patient, doctorUser] = await User.create([
     {
       name: "Ariana Rahman",
       email: "patient@medicare.test",
