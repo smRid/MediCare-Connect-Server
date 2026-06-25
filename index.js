@@ -285,7 +285,7 @@ app.post("/api/auth/register", async (req, res) => {
     });
 
     if (role === "doctor") {
-      await mongoose.connection.collection("doctors").insertOne({
+      await Doctor.create({
         user: user._id,
         specialization: req.body.specialization || "General Medicine",
         qualifications: req.body.qualifications || "MBBS",
@@ -387,12 +387,10 @@ app.post("/api/auth/google", async (req, res) => {
     }
 
     if (user.role === "doctor") {
-      const existingProfile = await mongoose.connection
-        .collection("doctors")
-        .findOne({ user: user._id });
+      const existingProfile = await Doctor.findOne({ user: user._id });
 
       if (!existingProfile) {
-        await mongoose.connection.collection("doctors").insertOne({
+        await Doctor.create({
           user: user._id,
           specialization: req.body.specialization || "General Medicine",
           qualifications: req.body.qualifications || "MBBS",
@@ -561,7 +559,7 @@ app.get("/api/doctors", async (req, res) => {
       },
     ];
 
-    const [result] = await mongoose.connection.collection("doctors").aggregate(pipeline).toArray();
+    const [result] = await Doctor.aggregate(pipeline);
     const doctors = result.doctors.map(serializeDoctor);
     const total = result.total[0]?.count || 0;
 
@@ -573,9 +571,7 @@ app.get("/api/doctors", async (req, res) => {
 
 app.get("/api/doctors/me", verifyToken, verifyRole("doctor"), async (req, res) => {
   try {
-    const doctor = await mongoose.connection
-      .collection("doctors")
-      .findOne({ user: req.user._id });
+    const doctor = await Doctor.findOne({ user: req.user._id });
 
     if (!doctor) return res.status(404).json({ message: "Doctor profile not found" });
 
@@ -590,9 +586,7 @@ app.get("/api/doctors/:id", async (req, res) => {
     const doctorId = toObjectId(req.params.id);
     if (!doctorId) return res.status(400).json({ message: "Invalid doctor id" });
 
-    const [doctor] = await mongoose.connection
-      .collection("doctors")
-      .aggregate([
+    const [doctor] = await Doctor.aggregate([
         { $match: { _id: doctorId } },
         {
           $lookup: {
@@ -609,8 +603,7 @@ app.get("/api/doctors/:id", async (req, res) => {
             profileImage: { $ifNull: ["$image", "$userProfile.photo"] },
           },
         },
-      ])
-      .toArray();
+      ]);
 
     if (!doctor) return res.status(404).json({ message: "Doctor not found" });
 
@@ -625,9 +618,7 @@ app.patch("/api/doctors/:id", verifyToken, async (req, res) => {
     const doctorId = toObjectId(req.params.id);
     if (!doctorId) return res.status(400).json({ message: "Invalid doctor id" });
 
-    const existingDoctor = await mongoose.connection
-      .collection("doctors")
-      .findOne({ _id: doctorId });
+    const existingDoctor = await Doctor.findOne({ _id: doctorId });
 
     if (!existingDoctor) return res.status(404).json({ message: "Doctor not found" });
 
@@ -671,10 +662,10 @@ app.patch("/api/doctors/:id", verifyToken, async (req, res) => {
     }
     updates.updatedAt = new Date();
 
-    const result = await mongoose.connection.collection("doctors").findOneAndUpdate(
+    const result = await Doctor.findOneAndUpdate(
       { _id: doctorId },
       { $set: updates },
-      { returnDocument: "after" },
+      { new: true },
     );
 
     res.json(serializeDoctor(result.value || result));
@@ -696,7 +687,7 @@ app.patch(
       const doctorId = toObjectId(req.params.id);
       if (!doctorId) return res.status(400).json({ message: "Invalid doctor id" });
 
-      const result = await mongoose.connection.collection("doctors").findOneAndUpdate(
+      const result = await Doctor.findOneAndUpdate(
         { _id: doctorId },
         {
           $set: {
@@ -704,7 +695,7 @@ app.patch(
             updatedAt: new Date(),
           },
         },
-        { returnDocument: "after" },
+        { new: true },
       );
 
       const doctor = result.value || result;
@@ -727,7 +718,7 @@ const appointmentStatuses = [
 ];
 
 const findDoctorProfileForUser = async (userId) =>
-  mongoose.connection.collection("doctors").findOne({ user: userId });
+  Doctor.findOne({ user: userId });
 
 app.get("/api/appointments", verifyToken, async (req, res) => {
   try {
@@ -760,7 +751,7 @@ app.post("/api/appointments", verifyToken, verifyRole("patient"), async (req, re
     const doctorId = toObjectId(req.body.doctor || req.body.doctorId);
     if (!doctorId) return res.status(400).json({ message: "Invalid doctor id" });
 
-    const doctor = await mongoose.connection.collection("doctors").findOne({
+    const doctor = await Doctor.findOne({
       _id: doctorId,
       verificationStatus: "verified",
     });
@@ -852,7 +843,7 @@ const recalculateDoctorRating = async (doctorId) => {
   ]);
   const stats = result[0] || { average: 0, count: 0 };
 
-  await mongoose.connection.collection("doctors").updateOne(
+  await Doctor.updateOne(
     { _id: doctorId },
     {
       $set: {
@@ -890,7 +881,7 @@ app.post("/api/reviews", verifyToken, verifyRole("patient"), async (req, res) =>
     const doctorId = toObjectId(req.body.doctor || req.body.doctorId);
     if (!doctorId) return res.status(400).json({ message: "Invalid doctor id" });
 
-    const doctor = await mongoose.connection.collection("doctors").findOne({ _id: doctorId });
+    const doctor = await Doctor.findOne({ _id: doctorId });
     if (!doctor) return res.status(404).json({ message: "Doctor not found" });
 
     const review = await Review.create({
@@ -1149,20 +1140,15 @@ app.patch(
 app.get("/api/stats", async (_req, res) => {
   try {
     const [doctors, patients, appointments, reviews, slotStats] = await Promise.all([
-      mongoose.connection
-        .collection("doctors")
-        .countDocuments({ verificationStatus: "verified" }),
+      Doctor.countDocuments({ verificationStatus: "verified" }),
       User.countDocuments({ role: "patient" }),
       Appointment.countDocuments(),
       Review.countDocuments(),
-      mongoose.connection
-        .collection("doctors")
-        .aggregate([
+      Doctor.aggregate([
           { $match: { verificationStatus: "verified" } },
           { $project: { slotCount: { $size: { $ifNull: ["$slots", []] } } } },
           { $group: { _id: null, total: { $sum: "$slotCount" } } },
-        ])
-        .toArray(),
+        ]),
     ]);
 
     res.json({
@@ -1181,12 +1167,9 @@ app.get("/api/analytics", verifyToken, verifyRole("admin"), async (_req, res) =>
   try {
     const [topDoctors, usersByRole, appointmentsByStatus, paymentsByStatus] =
       await Promise.all([
-        mongoose.connection
-          .collection("doctors")
-          .find({})
+        Doctor.find({})
           .sort({ ratingAverage: -1, reviewCount: -1 })
-          .limit(10)
-          .toArray(),
+          .limit(10),
         User.aggregate([{ $group: { _id: "$role", count: { $sum: 1 } } }]),
         Appointment.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
         Payment.aggregate([
@@ -1263,7 +1246,7 @@ const seedDemoData = async () => {
   ]);
 
   const now = new Date();
-  const doctorsResult = await mongoose.connection.collection("doctors").insertMany([
+  const doctorsResult = await Doctor.insertMany([
     {
       user: doctorUser._id,
       doctorName: "Dr. Mason Lee",
@@ -1324,7 +1307,7 @@ const seedDemoData = async () => {
     },
   ]);
 
-  const doctorIds = Object.values(doctorsResult.insertedIds);
+  const doctorIds = doctorsResult.map(doc => doc._id);
   const primaryDoctorId = doctorIds[0];
 
   const appointment = await Appointment.create({
