@@ -997,9 +997,23 @@ app.post(
         });
       }
 
-      const intent = await stripe.paymentIntents.create({
-        amount: Math.round(appointment.amount * 100),
-        currency: "usd",
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: "Doctor Appointment Consultation",
+              },
+              unit_amount: Math.round(appointment.amount * 100),
+            },
+            quantity: 1,
+          },
+        ],
+        mode: "payment",
+        success_url: `${req.headers.origin || "http://localhost:3000"}/dashboard?payment=success`,
+        cancel_url: `${req.headers.origin || "http://localhost:3000"}/doctors/${appointment.doctor}?payment=cancelled`,
         metadata: {
           appointmentId: appointment._id.toString(),
           patientId: appointment.patient.toString(),
@@ -1007,7 +1021,7 @@ app.post(
         },
       });
 
-      res.json({ clientSecret: intent.client_secret, transactionId: intent.id });
+      res.json({ url: session.url, transactionId: session.id });
     } catch (error) {
       res.status(500).json({ message: "Server error", error: error.message });
     }
