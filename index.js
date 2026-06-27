@@ -526,6 +526,35 @@ const buildDoctorSearchMatch = (query) => {
   return match;
 };
 
+app.get("/api/users", verifyToken, verifyRole("admin"), async (req, res) => {
+  try {
+    const users = await User.find({}).select("-passwordHash").sort({ createdAt: -1 });
+    res.json({ users });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.patch("/api/users/:id", verifyToken, verifyRole("admin"), async (req, res) => {
+  try {
+    const user = await User.findByIdAndUpdate(req.params.id, req.body, { new: true }).select("-passwordHash");
+    if (!user) return res.status(404).json({ message: "User not found" });
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.delete("/api/users/:id", verifyToken, verifyRole("admin"), async (req, res) => {
+  try {
+    const user = await User.findByIdAndDelete(req.params.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    res.json({ message: "User deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
 app.get("/api/doctors", async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
