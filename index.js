@@ -54,7 +54,17 @@ const userSchema = new mongoose.Schema(
 
 const User = mongoose.models.User || mongoose.model("User", userSchema);
 
-const doctorSchema = new mongoose.Schema({}, { strict: false, collection: "doctors" });
+const doctorSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+  },
+  { strict: false, collection: "doctors" }
+);
 const Doctor = mongoose.models.Doctor || mongoose.model("Doctor", doctorSchema);
 
 const appointmentSchema = new mongoose.Schema(
