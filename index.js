@@ -1191,7 +1191,11 @@ app.patch(
 
 app.get("/api/stats", async (_req, res) => {
   try {
-    const [doctors, patients, appointments, reviews, slotStats] = await Promise.all([
+    const startOfWeek = new Date();
+    startOfWeek.setDate(startOfWeek.getDate() - 6);
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const [doctors, patients, appointments, reviews, slotStats, activityData] = await Promise.all([
       Doctor.countDocuments({ verificationStatus: "verified" }),
       User.countDocuments({ role: "patient" }),
       Appointment.countDocuments(),
@@ -1201,7 +1205,28 @@ app.get("/api/stats", async (_req, res) => {
           { $project: { slotCount: { $size: { $ifNull: ["$slots", []] } } } },
           { $group: { _id: null, total: { $sum: "$slotCount" } } },
         ]),
+      Appointment.aggregate([
+        { $match: { createdAt: { $gte: startOfWeek } } },
+        { $group: { _id: { $dayOfWeek: "$createdAt" }, count: { $sum: 1 } } }
+      ])
     ]);
+
+    const dayMap = { 2: "Mon", 3: "Tue", 4: "Wed", 5: "Thu", 6: "Fri", 7: "Sat", 1: "Sun" };
+    const activity = [
+      { label: "Mon", value: 0 },
+      { label: "Tue", value: 0 },
+      { label: "Wed", value: 0 },
+      { label: "Thu", value: 0 },
+      { label: "Fri", value: 0 },
+      { label: "Sat", value: 0 },
+      { label: "Sun", value: 0 },
+    ];
+
+    activityData.forEach(item => {
+      const dayName = dayMap[item._id];
+      const dayObj = activity.find(d => d.label === dayName);
+      if (dayObj) dayObj.value = item.count;
+    });
 
     res.json({
       doctors,
@@ -1209,6 +1234,7 @@ app.get("/api/stats", async (_req, res) => {
       appointments,
       reviews,
       openSlots: slotStats[0]?.total || 0,
+      activity
     });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
