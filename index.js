@@ -492,10 +492,10 @@ const serializeDoctor = (doctor) => {
     _id: doctor._id?.toString(),
     user: doctor.user?.toString?.() || doctor.user,
     email: doctor.email || doctor.userProfile?.email,
-    contactNumber: doctor.contactNumber || doctor.phone || doctor.userProfile?.phone,
+    contactNumber: doctor.userProfile?.phone || doctor.contactNumber || doctor.phone,
     degree: doctor.degree || doctor.qualifications,
     hospitalName: doctor.hospitalName || doctor.hospital,
-    profileImage: doctor.profileImage || doctor.image || doctor.userProfile?.photo,
+    profileImage: doctor.userProfile?.photo ?? doctor.profileImage ?? doctor.image,
     availableDays: doctor.availableDays || doctor.days || [],
     availableSlots: doctor.availableSlots || doctor.slots || [],
   };
@@ -578,8 +578,8 @@ app.get("/api/doctors", async (req, res) => {
       { $unwind: { path: "$userProfile", preserveNullAndEmptyArrays: true } },
       {
         $addFields: {
-          doctorName: { $ifNull: ["$doctorName", "$userProfile.name"] },
-          profileImage: { $ifNull: ["$image", "$userProfile.photo"] },
+          doctorName: { $ifNull: ["$userProfile.name", "$doctorName"] },
+          profileImage: { $ifNull: ["$userProfile.photo", "$image"] },
         },
       },
       { $match: match },
@@ -631,8 +631,8 @@ app.get("/api/doctors/:id", async (req, res) => {
         { $unwind: { path: "$userProfile", preserveNullAndEmptyArrays: true } },
         {
           $addFields: {
-            doctorName: { $ifNull: ["$doctorName", "$userProfile.name"] },
-            profileImage: { $ifNull: ["$image", "$userProfile.photo"] },
+            doctorName: { $ifNull: ["$userProfile.name", "$doctorName"] },
+            profileImage: { $ifNull: ["$userProfile.photo", "$image"] },
           },
         },
       ]);
