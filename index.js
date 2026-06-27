@@ -1387,12 +1387,101 @@ const seedDemoData = async () => {
   );
 };
 
+const seedAdditionalDoctors = async () => {
+  if (process.env.SEED_DEMO_DATA === "false") return;
+  const existingDoctors = await Doctor.estimatedDocumentCount();
+  if (existingDoctors > 10) return; // Skip if already seeded with many doctors
+
+  const passwordHash = await bcrypt.hash("Password#123", 10);
+  let count = 1;
+
+  const specialties = [
+    "General Medicine", "Cardiology", "Dermatology", "Endocrinology", "Gastroenterology", 
+    "Neurology", "Obstetrics & Gynecology", "Oncology", "Ophthalmology", "Orthopedics", 
+    "Pediatrics", "Psychiatry", "Pulmonology", "Radiology", "Urology", "Diagnostics", 
+    "Preventive Care", "Emergency"
+  ];
+  const firstNames = ["James", "John", "Robert", "Michael", "William", "David", "Richard", "Joseph", "Thomas", "Charles", "Mary", "Patricia", "Jennifer", "Linda", "Elizabeth", "Barbara", "Susan", "Jessica", "Sarah", "Karen", "Alex", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Jamie", "Avery", "Peyton", "Cameron"];
+  const lastNames = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Martin"];
+  const hospitals = ["City General Hospital", "Mercy Medical Center", "Sunrise Health Clinic", "Pioneer Memorial Hospital", "Grandview Medical", "St. Jude Healthcare", "Evergreen Health", "Summit Medical Center", "Valley Health", "Beacon Hospital"];
+  const allDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const allSlots = ["08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM"];
+  
+  const getRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
+  const getRandomMultiple = (arr, min, max) => {
+    const c = Math.floor(Math.random() * (max - min + 1)) + min;
+    const shuffled = [...arr].sort(() => 0.5 - Math.random());
+    return shuffled.slice(0, c).sort((a, b) => arr.indexOf(a) - arr.indexOf(b));
+  };
+  
+  const qualificationsBySpec = {
+    Cardiology: ["MBBS, MD Cardiology", "MBBS, FACC", "DO, FACC"],
+    Neurology: ["MBBS, MD Neurology", "MBBS, FCPS Neurology", "DO, FAAN"],
+    Pediatrics: ["MBBS, DCH", "MBBS, MD Pediatrics", "DO, FAAP"],
+    Orthopedics: ["MBBS, MS Orthopedics", "MBBS, FRCS Orthopedics", "DO, FAAOS"],
+    Dermatology: ["MBBS, MD Dermatology", "MBBS, DDVL", "DO, FAAD"],
+    Psychiatry: ["MBBS, MD Psychiatry", "MBBS, DPM", "DO, FAPA"]
+  };
+
+  for (const spec of specialties) {
+    const numDoctors = Math.floor(Math.random() * 6) + 5; 
+    for (let i = 0; i < numDoctors; i++) {
+      const firstName = getRandom(firstNames);
+      const lastName = getRandom(lastNames);
+      const name = `Dr. ${firstName} ${lastName}`;
+      const email = `doctor${count}_${Date.now()}@medicare.test`;
+      const gender = Math.random() > 0.5 ? "male" : "female";
+      
+      const doctorImages = {
+        male: [
+          "https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?auto=format&fit=crop&w=600&q=80",
+          "https://images.unsplash.com/photo-1537368910025-700350fe46c7?auto=format&fit=crop&w=600&q=80",
+          "https://images.unsplash.com/photo-1622253692010-333f2da6031d?auto=format&fit=crop&w=600&q=80"
+        ],
+        female: [
+          "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=600&q=80",
+          "https://images.unsplash.com/photo-1594824476967-48c8b964273f?auto=format&fit=crop&w=600&q=80",
+          "https://images.unsplash.com/photo-1651008376811-b90baee60c1f?auto=format&fit=crop&w=600&q=80",
+          "https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=600&q=80"
+        ]
+      };
+      const profileImage = getRandom(doctorImages[gender]);
+
+      const user = await User.create({
+        name, email, passwordHash, role: "doctor",
+        phone: `+1 555 ${String(Math.floor(Math.random() * 9000) + 1000)}`,
+        gender, photo: profileImage,
+      });
+
+      await Doctor.create({
+        user: user._id, doctorName: name, specialization: spec,
+        qualifications: getRandom(qualificationsBySpec[spec] || ["MBBS, MD", "MBBS, Specialist", "DO, Board Certified"]),
+        experience: Math.floor(Math.random() * 20) + 3,
+        consultationFee: Math.floor(Math.random() * 150) + 50,
+        hospital: getRandom(hospitals),
+        image: profileImage,
+        days: getRandomMultiple(allDays, 3, 5),
+        slots: getRandomMultiple(allSlots, 3, 6),
+        verificationStatus: "verified",
+        bio: `Experienced ${spec} specialist dedicated to providing comprehensive patient care.`,
+        location: "New York, NY",
+        ratingAverage: Number((Math.random() * (5 - 3.5) + 3.5).toFixed(1)),
+        reviewCount: Math.floor(Math.random() * 100),
+        createdAt: new Date(), updatedAt: new Date(),
+      });
+      count++;
+    }
+  }
+  console.log(`Seeded an additional ${count - 1} doctors for specialties.`);
+};
+
 const connectDB = async () => {
   const mongoUri = process.env.MONGO_DB_URI;
   if (!mongoUri) throw new Error("Missing environment variable: MONGO_DB_URI");
 
   await mongoose.connect(mongoUri, { dbName: "medicare_connect" });
   await seedDemoData();
+  await seedAdditionalDoctors();
   console.log("MongoDB connected");
 };
 
