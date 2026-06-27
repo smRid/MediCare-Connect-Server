@@ -769,7 +769,10 @@ app.get("/api/appointments", verifyToken, async (req, res) => {
 
     const appointments = await Appointment.find(query)
       .populate("patient", "name email photo phone gender")
-      .populate("doctor")
+      .populate({
+        path: "doctor",
+        populate: { path: "user", select: "name" }
+      })
       .sort({ date: 1, time: 1 });
 
     res.json(appointments);
@@ -993,7 +996,10 @@ app.get("/api/payments", verifyToken, async (req, res) => {
 
     const payments = await Payment.find(query)
       .populate("patient", "name email")
-      .populate("doctor")
+      .populate({
+        path: "doctor",
+        populate: { path: "user", select: "name" }
+      })
       .populate("appointment")
       .sort({ createdAt: -1 });
 
