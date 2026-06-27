@@ -865,6 +865,12 @@ app.get("/api/reviews", async (req, res) => {
       query.doctor = doctorId;
     }
 
+    if (req.query.patient || req.query.patientId) {
+      const patientId = toObjectId(req.query.patient || req.query.patientId);
+      if (!patientId) return res.status(400).json({ message: "Invalid patient id" });
+      query.patient = patientId;
+    }
+
     const reviews = await Review.find(query)
       .populate("patient", "name photo")
       .sort({ createdAt: -1 })
