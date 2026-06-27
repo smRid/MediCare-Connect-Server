@@ -1012,7 +1012,7 @@ app.post(
           },
         ],
         mode: "payment",
-        success_url: `${req.headers.origin || "http://localhost:3000"}/dashboard?payment=success`,
+        success_url: `${req.headers.origin || "http://localhost:3000"}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${req.headers.origin || "http://localhost:3000"}/doctors/${appointment.doctor}?payment=cancelled`,
         metadata: {
           appointmentId: appointment._id.toString(),
